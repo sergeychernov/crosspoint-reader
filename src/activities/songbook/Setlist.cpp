@@ -3,6 +3,9 @@
 #include <ArduinoJson.h>
 
 #include <algorithm>
+#include <cstring>
+
+#include "ListLimits.h"
 
 namespace songbook {
 
@@ -41,23 +44,49 @@ bool isSafeSongPath(const std::string_view path) {
   return true;
 }
 
-SetlistParseResult parseSetlist(const std::string_view json, Setlist& out) {
+SetlistParseResult parseSetlist(const std::string_view json, Setlist& out, const SetlistRead read,
+                                const PathBudgetFn pathBudget) {
   out.title.clear();
   out.songs.clear();
+  out.truncated = false;
   JsonDocument doc;
   if (deserializeJson(doc, json.data(), json.size()) != DeserializationError::Ok || !doc.is<JsonObjectConst>()) {
     return SetlistParseResult::InvalidJson;
   }
-  if (const char* title = doc["title"].as<const char*>()) out.title = title;
+  if (const char* title = doc["title"].as<const char*>()) out.title = std::string(clampUtf8(title, MAX_LABEL_BYTES));
   const JsonArrayConst songs = doc["songs"].as<JsonArrayConst>();
   if (songs.isNull()) return SetlistParseResult::InvalidJson;
-  out.songs.reserve(std::min<size_t>(songs.size(), MAX_SETLIST_SONGS));
+
+  // Counted first, so the vector is reserved once and the budget sees its size.
+  // A loop, not std::count_if: ArduinoJson's array iterators have no iterator_category.
+  size_t usable = 0;
+  size_t seen = 0;
   for (const JsonVariantConst entry : songs) {
-    if (out.songs.size() >= MAX_SETLIST_SONGS) break;
+    if (seen++ >= MAX_SETLIST_SONGS) break;
     const char* path = entry.as<const char*>();
-    if (path && isSafeSongPath(path)) out.songs.emplace_back(path);
+    if (path && isSafeSongPath(path)) ++usable;
   }
-  return out.songs.empty() ? SetlistParseResult::NoSongs : SetlistParseResult::Ok;
+  if (usable == 0) return SetlistParseResult::NoSongs;
+  if (read == SetlistRead::TitleOnly) return SetlistParseResult::Ok;
+
+  const size_t vectorBytes = usable * sizeof(std::string);
+  const size_t budgetBytes = pathBudget ? pathBudget(vectorBytes) : MAX_SONG_PATH_BYTES;
+  if (budgetBytes == 0) return SetlistParseResult::OutOfMemory;
+  out.songs.reserve(usable);
+  ListBudget budget(budgetBytes);
+  seen = 0;
+  for (const JsonVariantConst entry : songs) {
+    if (seen++ >= MAX_SETLIST_SONGS) break;
+    const char* path = entry.as<const char*>();
+    if (!path || !isSafeSongPath(path)) continue;
+    if (!budget.take(ListBudget::stringCost(strlen(path)))) {
+      out.truncated = true;
+      break;
+    }
+    out.songs.emplace_back(path);
+  }
+  // Usable songs exist, so an empty list here means the budget could not hold the first one.
+  return out.songs.empty() ? SetlistParseResult::OutOfMemory : SetlistParseResult::Ok;
 }
 
 }  // namespace songbook

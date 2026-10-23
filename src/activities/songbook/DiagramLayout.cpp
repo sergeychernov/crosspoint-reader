@@ -10,9 +10,7 @@ void DiagramLayout::build(const Song& song, const SongChords& chords, const uint
                           const TextMeasurer& measurer, const Viewport area) {
   viewport = area;
   stringCount = std::max<uint8_t>(strings, 1);
-  for (const FontSize candidate : {FontSize::Large, FontSize::Medium}) {
-    if (tryBuild(candidate, song, chords, measurer)) return;
-  }
+  if (tryBuild(FontSize::Large, song, chords, measurer) || tryBuild(FontSize::Medium, song, chords, measurer)) return;
   tryBuild(FontSize::Small, song, chords, measurer);
 }
 

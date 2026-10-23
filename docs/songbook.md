@@ -159,6 +159,19 @@ view does not change. Other ChordPro tools ignore `{x_cue}`.
 - The Diagrams view shows up to 48 different chords per song.
 - A setlist file can be up to 16 KB and list up to 200 songs.
 - Only the first 200 files of each folder are read.
+- Titles, artists, and setlist names are kept up to 128 bytes (64 Cyrillic
+  or 128 Latin letters). Longer text is cut.
+- Each list keeps a limited amount of text in memory (32 KB, or less when
+  memory is low). A list that does not fit, for example a setlist whose
+  songs have long titles and artists, shows the entries that fit and then
+  "List cut short: not enough memory". A setlist keeps its first songs;
+  **All songs** and the setlist list keep files in the order the card
+  returns them. Ordinary lists of 200 songs or setlists usually fit.
+- The song paths of a setlist, or of **All songs**, have their own 16 KB
+  limit. A list stops before 200 songs when the file names are longer than
+  about 60 bytes on average, or when memory is low.
+- If the device cannot hold a list or open a setlist at all, the screen
+  shows "Not enough memory".
 - Opening a setlist reads the header of every song in it, so a very long
   setlist or **All songs** with many files can take a few seconds to open.
 

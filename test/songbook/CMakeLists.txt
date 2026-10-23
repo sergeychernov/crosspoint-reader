@@ -14,6 +14,7 @@ add_executable(SongbookTest
   ChordNameTest.cpp
   ChordShapesTest.cpp
   SongChordsTest.cpp
+  ListLimitsTest.cpp
   ${REPO_ROOT}/src/activities/songbook/ChordProParser.cpp
   ${REPO_ROOT}/src/activities/songbook/SongLayout.cpp
   ${REPO_ROOT}/src/activities/songbook/AutoScrollController.cpp
@@ -22,6 +23,7 @@ add_executable(SongbookTest
   ${REPO_ROOT}/src/activities/songbook/ChordShapes.cpp
   ${REPO_ROOT}/src/activities/songbook/SongChords.cpp
   ${REPO_ROOT}/src/activities/songbook/DiagramLayout.cpp
+  ${REPO_ROOT}/src/activities/songbook/ListLimits.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )

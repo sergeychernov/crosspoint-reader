@@ -12,6 +12,7 @@
 #include <functional>
 
 #include "ChordProParser.h"
+#include "ListLimits.h"
 
 namespace songbook {
 
@@ -21,6 +22,8 @@ constexpr size_t READ_CHUNK_BYTES = 512;
 constexpr size_t NAME_BUFFER_BYTES = 256;
 // Kept free after the parsed song; the layouts check their own budget.
 constexpr size_t LOAD_HEADROOM_BYTES = 8 * 1024;
+// Kept free after a list is built: a setlist file, its parse, and the song screen still have to load.
+constexpr size_t LIST_HEADROOM_BYTES = 40 * 1024;
 
 std::string fileStem(const std::string& path) {
   const size_t slash = path.rfind('/');
@@ -147,13 +150,35 @@ SongLoadResult loadSong(const std::string& relativePath, Song& song, const bool 
   return SongLoadResult::Ok;
 }
 
-void listSongFiles(std::vector<std::string>& out) {
+size_t listTextBudget(const size_t entryBytes, const size_t textLimit) {
+  const auto heap = HalMemory::getDefaultHeap();
+  if (heap.largestBlockBytes < entryBytes || heap.freeBytes < entryBytes + LIST_HEADROOM_BYTES) return 0;
+  return std::min(textLimit, heap.freeBytes - entryBytes - LIST_HEADROOM_BYTES);
+}
+
+ListResult listSongFiles(std::vector<std::string>& out) {
   out.clear();
-  forEachFile(SONGS_DIR, [&out](const char* name) {
-    if (hasSongExtension(name)) out.emplace_back(name);
+  size_t count = 0;
+  forEachFile(SONGS_DIR, [&count](const char* name) {
+    count += hasSongExtension(name);
+    return true;
+  });
+  const size_t budgetBytes = listTextBudget(count * sizeof(std::string), MAX_SONG_PATH_BYTES);
+  if (count > 0 && budgetBytes == 0) {
+    LOG_ERR("SONG", "OOM: list of %u songs", static_cast<unsigned>(count));
+    return ListResult::OutOfMemory;
+  }
+  out.reserve(count);
+  ListBudget budget(budgetBytes);
+  forEachFile(SONGS_DIR, [&](const char* name) {
+    if (!hasSongExtension(name)) return true;
+    // The directory may have grown since the count; reserve covers only that many.
+    if (out.size() == count || !budget.take(ListBudget::stringCost(strlen(name)))) return false;
+    out.emplace_back(name);
     return true;
   });
   std::sort(out.begin(), out.end(), lessIgnoreCase);
+  return budget.exhausted() ? ListResult::Truncated : ListResult::Complete;
 }
 
 bool hasSongFiles() {
@@ -165,18 +190,36 @@ bool hasSongFiles() {
   return found;
 }
 
-void listSetlists(std::vector<SetlistFile>& out) {
+ListResult listSetlists(std::vector<SetlistFile>& out, const size_t rowBytes) {
   out.clear();
-  forEachFile(SETLISTS_DIR, [&out](const char* name) {
-    if (endsWithJson(name)) out.push_back(SetlistFile{name, {}, SetlistStatus::Unreadable});
+  size_t count = 0;
+  forEachFile(SETLISTS_DIR, [&count](const char* name) {
+    count += endsWithJson(name);
+    return true;
+  });
+  const size_t budgetBytes = listTextBudget(count * (sizeof(SetlistFile) + rowBytes), MAX_LIST_TEXT_BYTES);
+  if (count > 0 && budgetBytes == 0) {
+    LOG_ERR("SONG", "OOM: list of %u setlists", static_cast<unsigned>(count));
+    return ListResult::OutOfMemory;
+  }
+  out.reserve(count);
+  // File names and titles each get half, so names alone can never use it all.
+  ListBudget names(budgetBytes / 2);
+  ListBudget titles(budgetBytes - budgetBytes / 2);
+  forEachFile(SETLISTS_DIR, [&](const char* name) {
+    if (!endsWithJson(name)) return true;
+    // The directory may have grown since the count; reserve covers only that many.
+    if (out.size() == count || !names.take(ListBudget::stringCost(strlen(name)))) return false;
+    out.push_back(SetlistFile{name, {}, SetlistStatus::Unreadable});
     return true;
   });
   std::sort(out.begin(), out.end(),
             [](const SetlistFile& a, const SetlistFile& b) { return lessIgnoreCase(a.file, b.file); });
   Setlist setlist;
-  for (auto& entry : out) {
+  for (size_t i = 0; i < out.size(); ++i) {
+    SetlistFile& entry = out[i];
     SetlistParseResult result = SetlistParseResult::InvalidJson;
-    if (loadSetlist(entry.file, setlist, result)) {
+    if (loadSetlist(entry.file, setlist, result, SetlistRead::TitleOnly)) {
       switch (result) {
         case SetlistParseResult::Ok:
           entry.status = SetlistStatus::Ok;
@@ -185,24 +228,40 @@ void listSetlists(std::vector<SetlistFile>& out) {
           entry.status = SetlistStatus::NoSongs;
           break;
         case SetlistParseResult::InvalidJson:
+        case SetlistParseResult::OutOfMemory:
           entry.status = SetlistStatus::Unreadable;
           break;
       }
     }
-    entry.title = setlist.title.empty() ? fileStem(entry.file) : setlist.title;
+    const std::string stem = setlist.title.empty() ? fileStem(entry.file) : std::string();
+    const std::string_view title = clampUtf8(setlist.title.empty() ? stem : setlist.title, MAX_LABEL_BYTES);
+    if (!titles.take(ListBudget::stringCost(title.size()))) {
+      // Entries past this one have no title; drop them, which frees their names.
+      out.erase(out.begin() + static_cast<std::ptrdiff_t>(i), out.end());
+      break;
+    }
+    // Built at its exact length: assigning into an inline string would round the capacity up.
+    entry.title = std::string(title);
   }
+  return names.exhausted() || titles.exhausted() ? ListResult::Truncated : ListResult::Complete;
 }
 
-bool loadSetlist(const std::string& file, Setlist& out, SetlistParseResult& result) {
+bool loadSetlist(const std::string& file, Setlist& out, SetlistParseResult& result, const SetlistRead read) {
   out.title.clear();
   out.songs.clear();
+  out.truncated = false;
   std::string json;
   if (!Storage.readFileToString("SONG", std::string(SETLISTS_DIR) + "/" + file, MAX_SETLIST_FILE_BYTES, json)) {
     LOG_ERR("SONG", "Cannot read setlist %s", file.c_str());
     return false;
   }
-  result = parseSetlist(json, out);
-  if (result != SetlistParseResult::Ok) LOG_ERR("SONG", "Invalid setlist %s", file.c_str());
+  result = parseSetlist(json, out, read,
+                        [](const size_t vectorBytes) { return listTextBudget(vectorBytes, MAX_SONG_PATH_BYTES); });
+  if (result == SetlistParseResult::OutOfMemory) {
+    LOG_ERR("SONG", "OOM: setlist %s (%u bytes)", file.c_str(), static_cast<unsigned>(json.size()));
+  } else if (result != SetlistParseResult::Ok) {
+    LOG_ERR("SONG", "Invalid setlist %s", file.c_str());
+  }
   return true;
 }
 

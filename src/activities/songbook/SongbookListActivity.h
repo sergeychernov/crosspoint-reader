@@ -13,6 +13,14 @@ class SongbookListActivity : public UiListActivity {
 
   int listCount() const override { return static_cast<int>(rowItems.size()); }
   void buildScreen(UiScreen& screen) override;
+  // Appends the inactive row that says the list did not fit in memory.
+  void addCutRow();
+  // Button navigation steps over inactive rows; isHeader keeps only touch off a row.
+  void navigateButtons() override;
+  // First active row from index, moving by step (wraps); index itself if none is active.
+  int activeRowFrom(int index, int step) const;
+  // Moves the selection off an inactive row after the rows are built.
+  void selectActiveRow();
 
   std::vector<freeink::ui::ListItem> rowItems;
   const char* emptyMessage = nullptr;

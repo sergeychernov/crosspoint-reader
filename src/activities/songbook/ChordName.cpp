@@ -86,10 +86,11 @@ bool takeNote(std::string_view& text, uint8_t& pitch) {
   if (text.empty() || text.front() < 'A' || text.front() > 'H') return false;
   int value = LETTERS[text.front() - 'A'];
   text.remove_prefix(1);
-  if (!text.empty() && text.front() == '#') {
+  const char next = text.empty() ? '\0' : text.front();
+  if (next == '#') {
     ++value;
     text.remove_prefix(1);
-  } else if (!text.empty() && text.front() == 'b') {
+  } else if (next == 'b') {
     --value;
     text.remove_prefix(1);
   } else if (text.substr(0, 3) == "\xE2\x99\xAF") {  // ♯

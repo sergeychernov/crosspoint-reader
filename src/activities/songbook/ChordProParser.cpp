@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <initializer_list>
 
+#include "ListLimits.h"
+
 namespace songbook {
 
 namespace {
@@ -27,6 +29,12 @@ bool equalsIgnoreCase(const std::string_view a, const std::string_view b) {
 
 bool startsWithIgnoreCase(const std::string_view text, const std::string_view prefix) {
   return text.size() >= prefix.size() && equalsIgnoreCase(text.substr(0, prefix.size()), prefix);
+}
+
+// Song lists keep the title and artist of every song, so each one is bounded.
+void assignClamped(std::string& out, const std::string_view value, const size_t maxBytes) {
+  const std::string_view kept = clampUtf8(value, maxBytes);
+  out.assign(kept.data(), kept.size());
 }
 
 bool isAny(const std::string_view name, const std::initializer_list<std::string_view> names) {
@@ -159,7 +167,7 @@ bool ChordProParser::feedLine(std::string_view line) {
 
 void ChordProParser::handleDirective(const std::string_view name, const std::string_view value) {
   if (isAny(name, {"title", "t"})) {
-    if (song.meta.title.empty()) song.meta.title.assign(value.data(), value.size());
+    if (song.meta.title.empty()) assignClamped(song.meta.title, value, MAX_LABEL_BYTES);
   } else if (isAny(name, {"artist", "key", "capo", "tempo", "duration"})) {
     handleMeta(name, value);
   } else if (equalsIgnoreCase(name, "meta")) {
@@ -207,7 +215,7 @@ void ChordProParser::handleDirective(const std::string_view name, const std::str
 void ChordProParser::handleMeta(const std::string_view name, const std::string_view value) {
   auto& meta = song.meta;
   if (equalsIgnoreCase(name, "artist")) {
-    if (meta.artist.empty()) meta.artist.assign(value.data(), value.size());
+    if (meta.artist.empty()) assignClamped(meta.artist, value, MAX_LABEL_BYTES);
   } else if (equalsIgnoreCase(name, "key")) {
     meta.key.assign(value.data(), value.size());
   } else if (equalsIgnoreCase(name, "capo")) {
@@ -219,7 +227,7 @@ void ChordProParser::handleMeta(const std::string_view name, const std::string_v
   } else if (equalsIgnoreCase(name, "duration")) {
     meta.durationSec = parseDuration(value);
   } else if (equalsIgnoreCase(name, "title")) {
-    if (meta.title.empty()) meta.title.assign(value.data(), value.size());
+    if (meta.title.empty()) assignClamped(meta.title, value, MAX_LABEL_BYTES);
   } else {
     ++skipped;
   }

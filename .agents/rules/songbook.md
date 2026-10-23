@@ -46,6 +46,7 @@ lines on top of upstream rather than reshaping upstream code.
 | `DiagramLayout` | Diagram grid: size choice, cells, pages | yes |
 | `SongbookPrefs` | `/.crosspoint/songbook.json` (`PersistableStore`) | no |
 | `SongbookFiles` | SD access through `HalStorage` | no |
+| `ListLimits` | Stored text length (`clampUtf8`) and per-list byte budget (`ListBudget`) | yes |
 | `SongbookActivity`, `SetlistActivity` | Lists on `SongbookListActivity` (`UiListActivity`) | no |
 | `SongActivity` | Performance screen: input, header, drawing, refresh | no |
 
@@ -59,6 +60,12 @@ The host-testable files must not include Arduino, HAL, or renderer headers.
   - `SongActivity::layoutsFit` requires the largest free block to hold the two biggest tables.
   - `openSong` frees the previous song and both layouts before loading.
   - `SongChords` is a fixed array of `MAX_CHORDS` inside `SongActivity`; it never allocates. Extra chords are dropped and `truncated()` is set.
+  - List screens keep every entry's strings while they are stacked, so each one is bounded:
+    - The parser and `parseSetlist` clamp titles and artists to `MAX_LABEL_BYTES` on a UTF-8 boundary.
+    - Every limit is in `ListLimits.h`. Song paths (a setlist, or All songs) stop at `MAX_SONG_PATH_BYTES`; the setlist picker and a song list stop at `MAX_LIST_TEXT_BYTES`. Each is the smaller of the constant and what `listTextBudget()` leaves after `LIST_HEADROOM_BYTES`, so a low heap cuts a list earlier.
+    - Before a list allocates, `listTextBudget()` checks the heap for its fixed entries; a setlist parse asks it, through `PathBudgetFn`, only after the JSON document is built and the usable paths are counted. If they do not fit, the screen shows "Not enough memory" instead of growing containers. Vectors are reserved once from a counting pass, and strings are built at their exact length (`ListBudget::stringCost` assumes that).
+    - The setlist picker reads each file with `SetlistRead::TitleOnly`, and gives file names and titles separate halves of its budget.
+    - A cut list ends with the inactive `addCutRow()` header row, which `navigateButtons()` steps over; a cut song list also shortens `setlist.songs`, so the song screen ends where the list does.
   - A diagram is computed at draw time from the `constexpr` tables; nothing is cached.
   - Keep lyric pieces merged per chord run, not per word.
 - **Timer.** Position comes from elapsed play time, never from summed
