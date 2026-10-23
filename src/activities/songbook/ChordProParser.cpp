@@ -1,5 +1,6 @@
 #include "ChordProParser.h"
 
+#include <algorithm>
 #include <initializer_list>
 
 namespace songbook {
@@ -29,10 +30,8 @@ bool startsWithIgnoreCase(const std::string_view text, const std::string_view pr
 }
 
 bool isAny(const std::string_view name, const std::initializer_list<std::string_view> names) {
-  for (const auto candidate : names) {
-    if (equalsIgnoreCase(name, candidate)) return true;
-  }
-  return false;
+  return std::any_of(names.begin(), names.end(),
+                     [name](const std::string_view candidate) { return equalsIgnoreCase(name, candidate); });
 }
 
 uint32_t parseUnsigned(const std::string_view text, bool& ok) {

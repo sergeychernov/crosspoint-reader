@@ -7,9 +7,9 @@
 #include <strings.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <functional>
-#include <iterator>
 
 #include "ChordProParser.h"
 
@@ -107,8 +107,8 @@ SongLoadResult loadSong(const std::string& relativePath, Song& song, const bool 
     const size_t chartBytes = chartCount * sizeof(ChartRow);
     const auto heap = HalMemory::getDefaultHeap();
     // The largest block must hold the two biggest reserves together (fragmentation).
-    size_t sizes[] = {textBytes, lineBytes, chordBytes, sectionBytes, chartBytes};
-    std::sort(std::begin(sizes), std::end(sizes), std::greater<>());
+    std::array<size_t, 5> sizes = {textBytes, lineBytes, chordBytes, sectionBytes, chartBytes};
+    std::sort(sizes.begin(), sizes.end(), std::greater<>());
     if (heap.freeBytes < textBytes + lineBytes + chordBytes + sectionBytes + chartBytes + LOAD_HEADROOM_BYTES ||
         heap.largestBlockBytes < sizes[0] + sizes[1]) {
       LOG_ERR("SONG", "OOM: free %u, largest %u for %u byte song", static_cast<unsigned>(heap.freeBytes),

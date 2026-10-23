@@ -137,8 +137,8 @@ class SongLayout {
   void addPiece(int x, int dy, TextRef ref, bool own, TextRole role, FontSize pieceSize);
   TextRef addOwnText(std::string_view text);
   std::string_view refText(const Song& song, TextRef ref, bool own) const;
-  void sectionLabel(const Song& song, const Section& section, int ordinal, const SectionNames& names,
-                    std::string& out) const;
+  static void sectionLabel(const Song& song, const Section& section, int ordinal, const SectionNames& names,
+                           std::string& out);
 
   int32_t layoutLyricLine(const Song& song, const SongLine& line, const TextMeasurer& measurer, int width, int indent,
                           int32_t y, bool chorus);

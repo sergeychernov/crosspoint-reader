@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <numeric>
 
 namespace songbook {
 
@@ -99,25 +100,27 @@ LayoutBudget clampBudget(LayoutBudget budget) {
 // Wrapped label rows: a generated label may take two rows in a narrow
 // column, and a long label from the file one more per 8 bytes.
 size_t labelRows(const Song& song) {
-  size_t rows = 2 * song.sections.size();
-  for (const Section& section : song.sections) rows += section.label.length / 8;
-  for (const ChartRow& row : song.chart) rows += row.label.length / 8 + 1;
-  return rows;
+  const size_t longLabels =
+      std::accumulate(song.sections.begin(), song.sections.end(), size_t{0},
+                      [](const size_t sum, const Section& section) { return sum + section.label.length / 8; });
+  const size_t chartLabels =
+      std::accumulate(song.chart.begin(), song.chart.end(), size_t{0},
+                      [](const size_t sum, const ChartRow& row) { return sum + row.label.length / 8 + 1; });
+  return 2 * song.sections.size() + longLabels + chartLabels;
 }
 
 // Labels copied from the file plus a generated label for every section.
 size_t labelBytes(const Song& song) {
-  size_t total = 128;
-  for (const Section& section : song.sections) total += section.label.length + LABEL_BYTES_PER_SECTION;
-  return total;
+  return std::accumulate(
+      song.sections.begin(), song.sections.end(), size_t{128},
+      [](const size_t sum, const Section& section) { return sum + section.label.length + LABEL_BYTES_PER_SECTION; });
 }
 
 }  // namespace
 
 size_t LayoutBudget::bytes() const {
-  size_t total = 64 * sizeof(int32_t);
-  for (const size_t table : tables()) total += table;
-  return total;
+  const auto sizes = tables();
+  return std::accumulate(sizes.begin(), sizes.end(), 64 * sizeof(int32_t));
 }
 
 std::array<size_t, 4> LayoutBudget::tables() const {
@@ -138,12 +141,13 @@ LayoutBudget SongLayout::lyricsBudget(const Song& song) {
 
 // Chart rows hold labels, chord runs (at least two chords each), comments, and grid text.
 LayoutBudget SongLayout::chartBudget(const Song& song) {
-  size_t chartBytes = 0;
-  for (const ChartRow& row : song.chart) chartBytes += row.chords.length;
-  size_t textBytes = 0;
-  for (const SongLine& line : song.lines) {
-    if (line.kind != LineKind::Lyrics) textBytes += line.lyric.length;
-  }
+  const size_t chartBytes =
+      std::accumulate(song.chart.begin(), song.chart.end(), size_t{0},
+                      [](const size_t sum, const ChartRow& row) { return sum + row.chords.length; });
+  const size_t textBytes =
+      std::accumulate(song.lines.begin(), song.lines.end(), size_t{0}, [](const size_t sum, const SongLine& line) {
+        return line.kind == LineKind::Lyrics ? sum : sum + line.lyric.length;
+      });
   LayoutBudget budget;
   budget.rows = labelRows(song) + song.lines.size() + song.chords.size() / 2 + 2 * song.chart.size() +
                 (chartBytes + textBytes) / 8 + 8;
@@ -234,7 +238,7 @@ TextRef SongLayout::addOwnText(const std::string_view value) {
 }
 
 void SongLayout::sectionLabel(const Song& song, const Section& section, const int ordinal, const SectionNames& names,
-                              std::string& out) const {
+                              std::string& out) {
   out.clear();
   if (section.label.length > 0) {
     out.assign(song.view(section.label));
@@ -326,7 +330,7 @@ int SongLayout::finishLyricRow(const TextMeasurer& measurer, const bool hasChord
   if (!rowOpen) return 0;
   const int chordHeight = hasChord ? measurer.lineHeight(TextRole::Chord, FontSize::Large) : 0;
   const int lyricHeight = hasLyric ? measurer.lineHeight(TextRole::Lyric, FontSize::Large) : 0;
-  Row& row = rowList.back();
+  const Row& row = rowList.back();
   for (size_t i = row.firstPiece; i < pieceList.size(); ++i) {
     if (pieceList[i].role == TextRole::Lyric) pieceList[i].dy = static_cast<int16_t>(chordHeight);
   }
@@ -493,13 +497,9 @@ void SongLayout::computeScrollStops(const std::vector<Row>& rows, const int32_t 
   out.push_back(0);
   if (rows.empty() || viewHeight <= 0 || contentHeight <= viewHeight) return;
   // The last top must show the final row whole.
-  int32_t maxTop = rows.back().y;
-  for (const Row& row : rows) {
-    if (contentHeight - row.y <= viewHeight) {
-      maxTop = row.y;
-      break;
-    }
-  }
+  const auto last =
+      std::find_if(rows.begin(), rows.end(), [&](const Row& row) { return contentHeight - row.y <= viewHeight; });
+  const int32_t maxTop = last != rows.end() ? last->y : rows.back().y;
   const int32_t step = std::max(1, viewHeight / 3);
   int32_t current = 0;
   while (current < maxTop) {
@@ -739,12 +739,12 @@ void SongLayout::buildChart(const Song& song, const TextMeasurer& measurer, cons
   // Medium at most, by owner preference: Large chords read too big in a chart.
   static constexpr FontSize SIZES[] = {FontSize::Medium, FontSize::Small};
   for (const FontSize candidate : SIZES) {
-    for (int columns = 1; columns <= 2; ++columns) {
-      const int columnWidth = columns == 1 ? viewport.width : (viewport.width - COLUMN_GAP) / 2;
+    for (int columnTry = 1; columnTry <= 2; ++columnTry) {
+      const int columnWidth = columnTry == 1 ? viewport.width : (viewport.width - COLUMN_GAP) / 2;
       if (columnWidth <= 0) continue;
       layoutChartAt(song, measurer, candidate, columnWidth, names, groupStarts);
       // An attempt that ran out of budget is missing rows; a smaller size may fit them all.
-      if (!full && packColumns(groupStarts, columns, columnWidth, viewport.height)) return;
+      if (!full && packColumns(groupStarts, columnTry, columnWidth, viewport.height)) return;
     }
   }
   layoutChartAt(song, measurer, FontSize::Small, viewport.width, names, groupStarts);

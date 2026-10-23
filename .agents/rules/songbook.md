@@ -109,6 +109,7 @@ The host-testable files must not include Arduino, HAL, or renderer headers.
 - **Host tests** (parser, layout, timer, setlists, and the shipped samples through `SampleContentTest`):
   `cmake --build build/test --target SongbookTest && ./build/test/songbook/SongbookTest`
 - **Firmware build:** `pio run -e default` with the pinned pioarduino core.
+- **Static analysis:** `pio check -e default --fail-on-defect low --fail-on-defect medium --fail-on-defect high`, as CI runs it.
 - **Screens and input:** use the `songbook-simulator` skill for the X3 desktop simulator and scripted screenshots. For diagrams, check every instrument, a song with more chords than one screen, a barre shape, an unknown chord, and that the instrument survives a restart.
 - **Hardware is still required.** The simulator does not model heap, e-ink ghosting, or refresh time. Device checks must cover:
   - heap (`MEM` free and MaxAlloc across repeated song switches);
